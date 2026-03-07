@@ -4,16 +4,94 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <fcntl.h>   // open()、O_WRONLY等flag在这里定义
+// fcntl 读音："f-control"，含义：file control
 #define MAX_INPUT 1024
 #define MAX_ARGS  64
 
-pid_t child_pid = -1;  // 全局变量，存当前子进程的pid
-// -1 表示当前没有子进程在运行
+pid_t child_pid = -1;
 
 void handle_sigint(int sig) {
     if (child_pid > 0) {
-        kill(child_pid, SIGINT);  // 杀死子进程
+        kill(child_pid, SIGINT);
     }
+}
+
+// 普通命令执行（之前写好的）
+void run_command(char **args) {
+    // 检测重定向符号
+    char *output_file = NULL;   // > 的文件名
+    char *input_file = NULL;    // < 的文件名
+    int argc = 0;
+    
+    // 遍历args，找>和
+    while (args[argc] != NULL) {
+        if (strcmp(args[argc], ">") == 0) {
+            output_file = args[argc + 1];  // >右边就是文件名
+            args[argc] = NULL;             // 截断args
+        } else if (strcmp(args[argc], "<") == 0) {
+            input_file = args[argc + 1];   // <右边就是文件名
+            args[argc] = NULL;             // 截断args
+        }
+        argc++;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        // 处理输出重定向
+        if (output_file != NULL) {
+            int f = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            dup2(f, STDOUT_FILENO);
+            close(f);
+        }
+        // 处理输入重定向
+        if (input_file != NULL) {
+            int f = open(input_file, O_RDONLY);
+            dup2(f, STDIN_FILENO);
+            close(f);
+        }
+        execvp(args[0], args);
+        perror("execvp failed");
+        exit(1);
+    } else {
+        child_pid = pid;
+        wait(NULL);
+        child_pid = -1;
+    }
+}
+
+// 管道执行
+void run_pipe(char **args1, char **args2) {
+    int fd[2];
+    pipe(fd);  // 创建管道
+
+    // 子进程1：执行左边命令（如ls）
+    pid_t pid1 = fork();
+    if (pid1 == 0) {
+        dup2(fd[1], STDOUT_FILENO);  // stdout → 管道写端
+        close(fd[0]);                // 关掉读端
+        close(fd[1]);                // dup2完了也关掉原fd
+        execvp(args1[0], args1);
+        perror("execvp failed");
+        exit(1);
+    }
+
+    // 子进程2：执行右边命令（如grep）
+    pid_t pid2 = fork();
+    if (pid2 == 0) {
+        dup2(fd[0], STDIN_FILENO);   // stdin → 管道读端
+        close(fd[1]);                // 关掉写端
+        close(fd[0]);                // dup2完了也关掉原fd
+        execvp(args2[0], args2);
+        perror("execvp failed");
+        exit(1);
+    }
+
+    // 父进程：关掉fd，等待两个子进程
+    close(fd[0]);
+    close(fd[1]);
+    waitpid(pid1, NULL, 0);
+    waitpid(pid2, NULL, 0);
 }
 
 int main() {
@@ -21,19 +99,14 @@ int main() {
     char *args[MAX_ARGS];
 
     signal(SIGINT, handle_sigint);
-    
+
     while (1) {
-        // 1. 显示提示符
         printf("myshell> ");
         fflush(stdout);
 
-        // 2. 读取用户输入
         if (fgets(input, MAX_INPUT, stdin) == NULL) break;
-
-        // 3. 去掉末尾换行符
         input[strcspn(input, "\n")] = 0;
 
-        // 4. 切割参数
         int argc = 0;
         args[0] = strtok(input, " ");
         while (args[argc] != NULL) {
@@ -42,21 +115,26 @@ int main() {
         }
 
         if (argc == 0) continue;
-
-        // 5. 内置命令：exit
         if (strcmp(args[0], "exit") == 0) break;
 
-        // 6. fork + exec
-        pid_t pid = fork();
+        // 检测有没有管道符
+        int pipe_pos = -1;
+        for (int i = 0; i < argc; i++) {
+            if (strcmp(args[i], "|") == 0) {
+                pipe_pos = i;
+                break;
+            }
+        }
 
-        if (pid == 0) {
-            execvp(args[0], args);
-            perror("execvp failed");
-            exit(1);
+        if (pipe_pos == -1) {
+            // 没有管道，普通执行
+            run_command(args);
         } else {
-            child_pid = pid;   // ← 新增这行
-            wait(NULL);
-            child_pid = -1;    // ← 新增这行，等待结束后重置
+            // 有管道，切割成两组参数
+            args[pipe_pos] = NULL;       // 在|处截断
+            char **args1 = args;         // |左边
+            char **args2 = args + pipe_pos + 1;  // |右边
+            run_pipe(args1, args2);
         }
     }
     return 0;

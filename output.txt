@@ -1,0 +1,4 @@
+total 24
+-rwxr-xr-x 1 zxw zxw 16968 Mar  8 01:36 myshell
+-rw-r--r-- 1 zxw zxw  3835 Mar  8 01:36 myshell.c
+-rw-r--r-- 1 zxw zxw     0 Mar  8 01:37 output.txt
