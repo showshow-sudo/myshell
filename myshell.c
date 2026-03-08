@@ -128,6 +128,9 @@ int main() {
         if (fgets(input, MAX_INPUT, stdin) == NULL) break;
         input[strcspn(input, "\n")] = 0;
 
+        char input_backup[MAX_INPUT];
+        strcpy(input_backup, input);  // 备份原始输入
+
         int argc = 0;
         args[0] = strtok(input, " ");
         while (args[argc] != NULL) {
@@ -157,7 +160,7 @@ int main() {
             char **args2 = args + pipe_pos + 1;  // |右边
             run_pipe(args1, args2);
         }
-        save_history(input); 
+        save_history(input_backup); 
     }
     return 0;
 }
