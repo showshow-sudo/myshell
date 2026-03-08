@@ -4,12 +4,13 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
-#include <fcntl.h>   // open()、O_WRONLY等flag在这里定义
-// fcntl 读音："f-control"，含义：file control
+#include <fcntl.h>   
+#include <sqlite3.h>
 #define MAX_INPUT 1024
 #define MAX_ARGS  64
 
 pid_t child_pid = -1;
+sqlite3 *db;  // 全局数据库连接
 
 void handle_sigint(int sig) {
     if (child_pid > 0) {
@@ -94,10 +95,30 @@ void run_pipe(char **args1, char **args2) {
     waitpid(pid2, NULL, 0);
 }
 
+void init_db() {
+    // 打开数据库（不存在会自动创建）
+    sqlite3_open("history.db", &db);
+    
+    // 创建表（如果不存在）
+    char *sql = "CREATE TABLE IF NOT EXISTS history ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "command TEXT,"
+                "timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);";
+    
+    sqlite3_exec(db, sql, NULL, NULL, NULL);
+}
+
+void save_history(char *command) {
+    char sql[1024];
+    sprintf(sql, "INSERT INTO history (command) VALUES ('%s');", command);
+    sqlite3_exec(db, sql, NULL, NULL, NULL);
+}
+
 int main() {
     char input[MAX_INPUT];
     char *args[MAX_ARGS];
 
+    init_db();  
     signal(SIGINT, handle_sigint);
 
     while (1) {
@@ -136,6 +157,7 @@ int main() {
             char **args2 = args + pipe_pos + 1;  // |右边
             run_pipe(args1, args2);
         }
+        save_history(input); 
     }
     return 0;
 }
