@@ -12,6 +12,19 @@
 pid_t child_pid = -1;
 sqlite3 *db;  // 全局数据库连接
 
+int callback(void *unused, int col_count, char **col_values, char **col_names) {
+    printf("%s | %s | %s\n",
+           col_values[0],
+           col_values[1],
+           col_values[2]);
+    return 0;
+}
+
+void show_history() {
+    char *sql = "SELECT * FROM history ORDER BY id DESC LIMIT 20;";
+    sqlite3_exec(db, sql, callback, NULL, NULL);
+}
+
 void handle_sigint(int sig) {
     if (child_pid > 0) {
         kill(child_pid, SIGINT);
@@ -140,6 +153,11 @@ int main() {
 
         if (argc == 0) continue;
         if (strcmp(args[0], "exit") == 0) break;
+
+        if (strcmp(args[0], "history") == 0) {
+            show_history();
+            continue;
+        }   
 
         // 检测有没有管道符
         int pipe_pos = -1;
